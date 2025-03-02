@@ -1,4 +1,4 @@
-use std::{fs::File, io::Read, path::PathBuf, vec};
+use std::{fs::File, hash::Hash, io::Read, path::PathBuf, vec};
 
 use anyhow::{Ok, Result, anyhow};
 use toml::Table;
@@ -7,6 +7,19 @@ use toml::Table;
 pub struct ModFile {
     pub file_name: String,
     pub meta_list: Vec<ModMetadata>,
+}
+
+impl PartialEq for ModFile {
+    fn eq(&self, other: &Self) -> bool {
+        self.file_name == other.file_name
+    }
+}
+
+impl Eq for ModFile {}
+impl Hash for ModFile {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.file_name.hash(state);
+    }
 }
 
 #[derive(Debug)]
