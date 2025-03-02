@@ -1,13 +1,13 @@
 use std::{
     fs::File,
     hash::Hash,
-    io::{Cursor, Read},
+    io::{Cursor, Read, Seek},
     path::PathBuf,
     vec,
 };
 
 use anyhow::{Ok, Result, anyhow};
-use zip::result::ZipResult;
+use zip::{ZipArchive, result::ZipResult};
 
 #[derive(Debug)]
 pub struct ModFile {
@@ -45,15 +45,25 @@ pub fn parse_mod(path: PathBuf) -> Result<ModFile> {
     }
 
     let file = File::open(&path)?;
-    let mut archive = zip::ZipArchive::new(file)?;
+    let archive = zip::ZipArchive::new(file)?;
 
-    let mut metadata_contents = vec![];
+    parse_mod_zip(archive, &path)
+}
+
+pub fn parse_mod_zip<T: Read + Seek>(
+    mut archive: ZipArchive<T>,
+    path: &PathBuf,
+) -> Result<ModFile> {
+    let mut meta_list = vec![];
     {
-        let mut meta_file = archive.by_name("META-INF/neoforge.mods.toml")?;
-        let mut meta_content = String::new();
-        meta_file.read_to_string(&mut meta_content)?;
+        let meta_file = archive.by_name("META-INF/neoforge.mods.toml");
+        if let ZipResult::Ok(mut meta_file) = meta_file {
+            let mut meta_content = String::new();
+            meta_file.read_to_string(&mut meta_content)?;
 
-        metadata_contents.push(meta_content);
+            let meta = parse_neoforge_meta(&meta_content)?;
+            meta_list.extend(meta);
+        }
     };
 
     let jarjar_content = {
@@ -82,28 +92,16 @@ pub fn parse_mod(path: PathBuf) -> Result<ModFile> {
                     .map(|s| s.to_string())
             });
 
-        for path in jar_paths {
-            let path = path?;
-            let inner_zip = archive.by_name(&path)?;
+        for entry_path in jar_paths {
+            let entry_path = entry_path?;
+            let inner_zip = archive.by_name(&entry_path)?;
             let inner_zip_bytes = inner_zip.bytes().collect::<Result<Vec<u8>, _>>()?; // TODO: don't fully read into memory
             let reader = Cursor::new(inner_zip_bytes);
-            let mut inner_archive = zip::ZipArchive::new(reader)?;
+            let inner_archive = zip::ZipArchive::new(reader)?;
 
-            if let ZipResult::Ok(mut meta_file) =
-                inner_archive.by_name("META-INF/neoforge.mods.toml")
-            {
-                let mut content = String::new();
-                meta_file.read_to_string(&mut content)?;
-
-                metadata_contents.push(content);
-            }
+            let inner_meta = parse_mod_zip(inner_archive, path)?;
+            meta_list.extend(inner_meta.meta_list);
         }
-    }
-
-    let mut meta_list = vec![];
-    for content in metadata_contents {
-        let meta = parse_neoforge_meta(&content)?;
-        meta_list.extend(meta);
     }
 
     Ok(ModFile {
@@ -120,9 +118,10 @@ pub fn parse_neoforge_meta(meta_content: &str) -> Result<Vec<ModMetadata>> {
         .as_array()
         .ok_or_else(|| anyhow!("Mods is not an array"))?;
 
+    let empty_table = toml::Value::Table(toml::Table::new());
     let dependencies_map = value
         .get("dependencies")
-        .ok_or_else(|| anyhow!("Missing dependencies property in neoforge.mods.toml"))?
+        .unwrap_or(&empty_table)
         .as_table()
         .ok_or_else(|| anyhow!("Dependencies is not a table"))?;
 
@@ -147,6 +146,8 @@ pub fn parse_neoforge_meta(meta_content: &str) -> Result<Vec<ModMetadata>> {
             }) || d
                 .get("required")
                 .is_some_and(|r| r.as_bool().unwrap_or(false))
+                || d.get("mandatory")
+                    .is_some_and(|m| m.as_bool().unwrap_or(false))
         });
 
         let metadata = ModMetadata {
