@@ -30,7 +30,10 @@ pub fn start(mods_dir: PathBuf) -> Result<()> {
     }
 
     let half = take_half(&mod_files, &builtin_mods)?;
-    println!("Half of mods: {:?}", half);
+    println!(
+        "Half of mods: {:?}",
+        half.iter().map(|m| m.file_name.clone()).collect::<Vec<_>>()
+    );
 
     Ok(())
 }

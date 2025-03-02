@@ -10,7 +10,7 @@ impl ModFile {
     }
 
     pub fn get_extra_dependencies<'a>(
-        &self,
+        &'a self,
         mods: &'a Vec<ModFile>,
         current_mods: &HashSet<&'a ModFile>,
         builtin_mods: &HashSet<String>,
@@ -31,6 +31,13 @@ impl ModFile {
                 if let Some(mod_file) = mods.iter().find(|m| m.get_mod_ids().contains(&dependency))
                 {
                     dependencies.insert(mod_file);
+                    let mut new_current_mods = current_mods.clone();
+                    new_current_mods.insert(&self);
+                    dependencies.extend(mod_file.get_extra_dependencies(
+                        mods,
+                        &new_current_mods,
+                        builtin_mods,
+                    )?);
                 } else {
                     return Err(anyhow!("Missing dependency: {}", dependency));
                 }

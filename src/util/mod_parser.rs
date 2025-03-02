@@ -144,7 +144,9 @@ pub fn parse_neoforge_meta(meta_content: &str) -> Result<Vec<ModMetadata>> {
             d.get("type").is_some_and(|t| {
                 t.as_str()
                     .is_some_and(|t| t.to_ascii_lowercase() == "required")
-            })
+            }) || d
+                .get("required")
+                .is_some_and(|r| r.as_bool().unwrap_or(false))
         });
 
         let metadata = ModMetadata {
