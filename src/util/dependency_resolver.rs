@@ -11,7 +11,7 @@ impl ModFile {
 
     pub fn get_extra_dependencies<'a>(
         &'a self,
-        mods: &'a Vec<ModFile>,
+        mods: &'a Vec<&ModFile>,
         current_mods: &HashSet<&'a ModFile>,
         builtin_mods: &HashSet<String>,
     ) -> Result<HashSet<&'a ModFile>> {
@@ -28,7 +28,7 @@ impl ModFile {
                     continue;
                 }
 
-                if let Some(mod_file) = mods.iter().find(|m| m.get_mod_ids().contains(&dependency))
+                if let Some(&mod_file) = mods.iter().find(|m| m.get_mod_ids().contains(&dependency))
                 {
                     dependencies.insert(mod_file);
                     let mut new_current_mods = current_mods.clone();

@@ -29,23 +29,105 @@ pub fn start(mods_dir: PathBuf) -> Result<()> {
         mod_files.push(mod_file);
     }
 
+    bisect(&mods_dir, &mod_files.iter().collect(), &builtin_mods)?;
+
+    Ok(())
+}
+
+fn bisect(
+    mods_dir: &PathBuf,
+    mod_files: &Vec<&ModFile>,
+    builtin_mods: &HashSet<String>,
+) -> Result<()> {
     let half = take_half(&mod_files, &builtin_mods)?;
     println!(
         "Half of mods: {:?}",
         half.iter().map(|m| m.file_name.clone()).collect::<Vec<_>>()
     );
 
-    Ok(())
+    let mods_disabled_dir = mods_dir.parent().unwrap().join("mods.disabled");
+    if !mods_disabled_dir.exists() {
+        std::fs::create_dir(&mods_disabled_dir)?;
+    }
+
+    let mut disabled_mods = HashSet::new();
+    for &mod_file in mod_files {
+        if half.contains(mod_file) {
+            continue;
+        }
+
+        let file_name = &mod_file.file_name;
+        std::fs::rename(
+            &mods_dir.join(file_name),
+            &mods_disabled_dir.join(file_name),
+        )?;
+        disabled_mods.insert(mod_file);
+    }
+
+    // bisect check
+    let bisect_result = dialoguer::Confirm::new()
+        .with_prompt("The mod you want to find is still enabled?")
+        .interact()?;
+
+    println!("Bisect result: {}", bisect_result);
+
+    if !bisect_result {
+        // swap mods and disabled mods
+        for &mod_file in &disabled_mods {
+            std::fs::rename(
+                &mods_disabled_dir.join(&mod_file.file_name),
+                &mods_dir.join(&mod_file.file_name),
+            )?;
+        }
+        for &mod_file in &half {
+            std::fs::rename(
+                &mods_dir.join(&mod_file.file_name),
+                &mods_disabled_dir.join(&mod_file.file_name),
+            )?;
+        }
+    }
+
+    let new_mod_files: Vec<&ModFile> = (if bisect_result {
+        half
+    } else {
+        let mut extra_dependencies = HashSet::new();
+        for mod_file in &disabled_mods {
+            extra_dependencies.extend(mod_file.get_extra_dependencies(
+                mod_files,
+                &disabled_mods,
+                builtin_mods,
+            )?);
+        }
+
+        for dependency in &extra_dependencies {
+            if !disabled_mods.contains(dependency) {
+                std::fs::rename(
+                    &mods_disabled_dir.join(&dependency.file_name),
+                    &mods_dir.join(&dependency.file_name),
+                )?;
+            }
+        }
+
+        &disabled_mods | &extra_dependencies
+    })
+    .iter()
+    .cloned()
+    .collect();
+
+    if new_mod_files.len() == 1 {
+        return Ok(());
+    }
+    bisect(mods_dir, &new_mod_files, builtin_mods)
 }
 
 fn take_half<'a>(
-    mod_files: &'a Vec<ModFile>,
+    mod_files: &'a Vec<&ModFile>,
     builtin_mods: &HashSet<String>,
 ) -> Result<HashSet<&'a ModFile>> {
     let mut half = HashSet::new();
     let mut i = 0;
     while half.len() < mod_files.len() / 2 {
-        let mod_file = &mod_files[i];
+        let mod_file = mod_files[i];
         half.insert(mod_file);
         half.extend(mod_file.get_extra_dependencies(mod_files, &half, builtin_mods)?);
         i += 1;
