@@ -1,7 +1,13 @@
-use std::{fs::File, hash::Hash, io::Read, path::PathBuf, vec};
+use std::{
+    fs::File,
+    hash::Hash,
+    io::{Cursor, Read},
+    path::PathBuf,
+    vec,
+};
 
 use anyhow::{Ok, Result, anyhow};
-use toml::Table;
+use zip::result::ZipResult;
 
 #[derive(Debug)]
 pub struct ModFile {
@@ -41,20 +47,73 @@ pub fn parse_mod(path: PathBuf) -> Result<ModFile> {
     let file = File::open(&path)?;
     let mut archive = zip::ZipArchive::new(file)?;
 
-    let mut meta_file = archive.by_name("META-INF/neoforge.mods.toml")?;
-    let mut meta_content = String::new();
-    meta_file.read_to_string(&mut meta_content)?;
+    let mut metadata_contents = vec![];
+    {
+        let mut meta_file = archive.by_name("META-INF/neoforge.mods.toml")?;
+        let mut meta_content = String::new();
+        meta_file.read_to_string(&mut meta_content)?;
 
-    let metadata = parse_neoforge_meta(&meta_content)?;
+        metadata_contents.push(meta_content);
+    };
+
+    let jarjar_content = {
+        let result = archive.by_name("META-INF/jarjar/metadata.json");
+        if let ZipResult::Ok(mut file) = result {
+            let mut jarjar_content = String::new();
+            file.read_to_string(&mut jarjar_content)?;
+            Some(jarjar_content)
+        } else {
+            None
+        }
+    };
+    if let Some(jarjar_content) = jarjar_content {
+        let value: serde_json::Value = serde_json::from_str(&jarjar_content)?;
+        let jar_paths = value
+            .get("jars")
+            .ok_or_else(|| anyhow!("Missing jars property in metadata.json"))?
+            .as_array()
+            .ok_or_else(|| anyhow!("jars is not an array"))?
+            .iter()
+            .map(|v| {
+                v.get("path")
+                    .ok_or_else(|| anyhow!("Missing path property in jar"))?
+                    .as_str()
+                    .ok_or_else(|| anyhow!("path is not a string"))
+                    .map(|s| s.to_string())
+            });
+
+        for path in jar_paths {
+            let path = path?;
+            let inner_zip = archive.by_name(&path)?;
+            let inner_zip_bytes = inner_zip.bytes().collect::<Result<Vec<u8>, _>>()?; // TODO: don't fully read into memory
+            let reader = Cursor::new(inner_zip_bytes);
+            let mut inner_archive = zip::ZipArchive::new(reader)?;
+
+            if let ZipResult::Ok(mut meta_file) =
+                inner_archive.by_name("META-INF/neoforge.mods.toml")
+            {
+                let mut content = String::new();
+                meta_file.read_to_string(&mut content)?;
+
+                metadata_contents.push(content);
+            }
+        }
+    }
+
+    let mut meta_list = vec![];
+    for content in metadata_contents {
+        let meta = parse_neoforge_meta(&content)?;
+        meta_list.extend(meta);
+    }
 
     Ok(ModFile {
         file_name: path.file_name().unwrap().to_string_lossy().to_string(),
-        meta_list: metadata,
+        meta_list,
     })
 }
 
 pub fn parse_neoforge_meta(meta_content: &str) -> Result<Vec<ModMetadata>> {
-    let value: Table = toml::from_str(meta_content)?;
+    let value: toml::Table = toml::from_str(meta_content)?;
     let mods_array = value
         .get("mods")
         .ok_or_else(|| anyhow!("Missing mods property in neoforge.mods.toml"))?
