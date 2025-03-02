@@ -9,21 +9,29 @@ impl ModFile {
         self.meta_list.iter().map(|m| &m.id).collect()
     }
 
-    pub fn get_dependencies<'a>(
+    pub fn get_extra_dependencies<'a>(
         &self,
         mods: &'a Vec<ModFile>,
+        current_mods: &HashSet<&'a ModFile>,
         builtin_mods: &HashSet<String>,
     ) -> Result<HashSet<&'a ModFile>> {
         let mut dependencies = HashSet::new();
         for mod_meta in &self.meta_list {
             for dependency in mod_meta.dependencies.iter() {
+                if self.get_mod_ids().contains(&dependency) || builtin_mods.contains(dependency) {
+                    continue;
+                }
+                if let Some(_) = current_mods
+                    .iter()
+                    .find(|m| m.get_mod_ids().contains(&dependency))
+                {
+                    continue;
+                }
+
                 if let Some(mod_file) = mods.iter().find(|m| m.get_mod_ids().contains(&dependency))
                 {
                     dependencies.insert(mod_file);
                 } else {
-                    if builtin_mods.contains(dependency) {
-                        continue;
-                    }
                     return Err(anyhow!("Missing dependency: {}", dependency));
                 }
             }

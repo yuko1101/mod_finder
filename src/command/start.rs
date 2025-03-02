@@ -44,7 +44,7 @@ fn take_half<'a>(
     while half.len() < mod_files.len() / 2 {
         let mod_file = &mod_files[i];
         half.insert(mod_file);
-        half.extend(mod_file.get_dependencies(mod_files, builtin_mods)?);
+        half.extend(mod_file.get_extra_dependencies(mod_files, &half, builtin_mods)?);
         i += 1;
     }
 
