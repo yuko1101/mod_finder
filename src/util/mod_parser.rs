@@ -4,14 +4,19 @@ use anyhow::{Ok, Result, anyhow};
 use toml::Table;
 
 #[derive(Debug)]
+pub struct ModFile {
+    pub file_name: String,
+    pub meta_list: Vec<ModMetadata>,
+}
+
+#[derive(Debug)]
 pub struct ModMetadata {
     pub name: String,
     pub id: String,
-    pub jar_name: String,
     pub dependencies: Vec<String>,
 }
 
-pub fn parse_mod(path: PathBuf) -> Result<Vec<ModMetadata>> {
+pub fn parse_mod(path: PathBuf) -> Result<ModFile> {
     if path
         .extension()
         .ok_or_else(|| anyhow!("Missing extension"))?
@@ -27,15 +32,15 @@ pub fn parse_mod(path: PathBuf) -> Result<Vec<ModMetadata>> {
     let mut meta_content = String::new();
     meta_file.read_to_string(&mut meta_content)?;
 
-    let metadata = parse_neoforge_meta(
-        &meta_content,
-        path.file_name().unwrap().to_string_lossy().to_string(),
-    )?;
+    let metadata = parse_neoforge_meta(&meta_content)?;
 
-    Ok(metadata)
+    Ok(ModFile {
+        file_name: path.file_name().unwrap().to_string_lossy().to_string(),
+        meta_list: metadata,
+    })
 }
 
-pub fn parse_neoforge_meta(meta_content: &str, jar_name: String) -> Result<Vec<ModMetadata>> {
+pub fn parse_neoforge_meta(meta_content: &str) -> Result<Vec<ModMetadata>> {
     let value: Table = toml::from_str(meta_content)?;
     let mods_array = value
         .get("mods")
@@ -78,7 +83,6 @@ pub fn parse_neoforge_meta(meta_content: &str, jar_name: String) -> Result<Vec<M
                 .ok_or_else(|| anyhow!("displayName is not a string"))?
                 .to_string(),
             id: id.to_string(),
-            jar_name: jar_name.clone(),
             dependencies: required_dependencies
                 .filter_map(|d| {
                     d.get("modId")
