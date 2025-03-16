@@ -18,6 +18,8 @@ enum SubCommand {
     Start {
         #[arg(required = true)]
         mods_dir: PathBuf,
+        #[arg(required = false)]
+        consistent_mods: String,
     },
 }
 
@@ -26,8 +28,8 @@ fn main() -> Result<()> {
     println!("{:?}", args);
 
     match args.cmd {
-        SubCommand::Start { mods_dir } => {
-            command::start::start(mods_dir)?;
+        SubCommand::Start { mods_dir, consistent_mods } => {
+            command::start::start(mods_dir, consistent_mods)?;
         }
     }
 

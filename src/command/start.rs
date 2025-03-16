@@ -1,11 +1,13 @@
 use std::{collections::HashSet, path::PathBuf};
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 
 use crate::util::{self, mod_parser::ModFile};
 
-pub fn start(mods_dir: PathBuf) -> Result<()> {
+pub fn start(mods_dir: PathBuf, consistent_mods: String) -> Result<()> {
     println!("Starting with mods_dir: {:?}", mods_dir);
+
+    let consistent_mods: Vec<String> = consistent_mods.split(',').map(|s| s.to_string()).collect();
 
     let mut builtin_mods = HashSet::new();
     builtin_mods.insert("minecraft".to_string());
@@ -29,7 +31,12 @@ pub fn start(mods_dir: PathBuf) -> Result<()> {
         mod_files.push(mod_file);
     }
 
-    bisect(&mods_dir, &mod_files.iter().collect(), &builtin_mods)?;
+    bisect(
+        &mods_dir,
+        &mod_files.iter().collect(),
+        &consistent_mods,
+        &builtin_mods,
+    )?;
 
     Ok(())
 }
@@ -37,9 +44,10 @@ pub fn start(mods_dir: PathBuf) -> Result<()> {
 fn bisect(
     mods_dir: &PathBuf,
     mod_files: &Vec<&ModFile>,
+    consistent_mods: &Vec<String>,
     builtin_mods: &HashSet<String>,
 ) -> Result<()> {
-    let half = take_half(&mod_files, &builtin_mods)?;
+    let half = take_half(mod_files, consistent_mods, builtin_mods)?;
     println!(
         "Half of mods: {:?}",
         half.iter().map(|m| m.file_name.clone()).collect::<Vec<_>>()
@@ -117,15 +125,29 @@ fn bisect(
     if new_mod_files.len() == 1 {
         return Ok(());
     }
-    bisect(mods_dir, &new_mod_files, builtin_mods)
+    bisect(mods_dir, &new_mod_files, consistent_mods, builtin_mods)
 }
 
 fn take_half<'a>(
     mod_files: &'a Vec<&ModFile>,
+    consistent_mods: &Vec<String>,
     builtin_mods: &HashSet<String>,
 ) -> Result<HashSet<&'a ModFile>> {
     let mut half = HashSet::new();
     let mut i = 0;
+
+    for const_mod in consistent_mods {
+        if let Some(&mod_file) = mod_files
+            .iter()
+            .find(|m| m.get_mod_ids().contains(&const_mod))
+        {
+            half.insert(mod_file);
+            half.extend(mod_file.get_extra_dependencies(mod_files, &half, builtin_mods)?);
+        } else {
+            return Err(anyhow!("Missing consistent mod: {}", const_mod));
+        }
+    }
+
     while half.len() < mod_files.len() / 2 {
         let mod_file = mod_files[i];
         half.insert(mod_file);
